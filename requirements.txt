@@ -1,0 +1,14 @@
+Django==2.1.7
+django-crispy-forms==1.7.2
+django-elasticsearch-dsl==0.5.1
+django-static-jquery==2.1.4
+elasticsearch==6.3.1
+elasticsearch-dsl==6.1.0
+ipaddress==1.0.22
+Pillow==5.4.1
+psycopg2-binary==2.8.2
+python-dateutil==2.8.0
+pytz==2018.9
+six==1.12.0
+transliterate==1.10.2
+urllib3==1.25.1
