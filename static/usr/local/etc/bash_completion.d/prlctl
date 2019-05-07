@@ -1,0 +1,834 @@
+# Parallels Desktop for Mac
+# Bash completion helpers for prlctl command-line tool.
+#
+# Copyright (c) Parallels International GmbH.
+# All rights reserved.
+# http://www.parallels.com
+
+get_vms() {
+	# TODO if remote parameters are specified -
+	# use them here
+	prlctl list -a -o name | awk '{ if (NR > 1) print $0 }'
+}
+
+get_snaps_names() {
+	# TODO Don't know how to find snaps names easily
+	true
+}
+
+correct_special_symbols() {
+# remove unnecessary "\" (\134) symbol before special symbols
+# we decided to process only: " ", (", ")", "[", "]" - symbols in vm name
+	echo $1 | awk '{ gsub("\134\134\134\040", " ", $0);\
+		gsub("\134\134\134\050", "(", $0); gsub("\134\134\134\051", ")", $0);\
+		gsub("\134\134\134\133", "[", $0); gsub("\134\134\134\135", "]", $0);\
+		print $0; }'
+}
+
+get_snaps_ids() {
+	# TODO Add checking of vm existence
+	s_id="$(correct_special_symbols "$1")"
+	prlctl snapshot-list "$s_id" | awk '{if (NR > 1) print substr($0, 2, 36)}'
+}
+
+get_ostypes() {
+	prlctl create test123 --ostype list | awk '{ gsub("The following values are allowed:", "", $0); print $0 }'
+}
+
+get_distros() {
+	prlctl create test123 --distribution list | awk '{ gsub("The following values are allowed:", "", $0); print $0 }'
+}
+
+get_ostemplates() {
+	# available templates
+	prlctl list -t -o name | awk '{if (NR > 1) print $1}'
+}
+
+get_devs() {
+	# TODO Add checking of vm existence and device type/mode
+	s_id="$(correct_special_symbols "$1")"
+	devtype=$2
+	prlctl list -i "$s_id" | egrep '^[[:space:]]+[[:alnum:]]+ \([+-]\)' | awk '{print $1}'
+}
+
+_prlctl()
+{
+	local cur prev opts base
+	COMPREPELY=()
+
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	local actions_on_vmid="capture clone delete enter exec \
+		pause reset resume restart start status change-sid \
+		snapshot snapshot-delete snapshot-list snapshot-switch unregister \
+		reset-uptime encrypt decrypt protection-set move \
+		protection-remove change-passwd problem-report set"
+
+	local actions_without_vmid="convert create list register"
+	local other_actions="stop suspend" 	# can't add them to actions_on_vmid because there are options with the same names
+										# (for --autostop and --on-window-close)
+
+	local capture_flags='--file'
+	local clone_flags='--name'
+	local clone_optional_flags='--template --dst --changesid --regenerate-src-uuid --linked --detach-external-hdd'
+	local clone_linked_flags='-i --id'
+	local convert_flags='--dst --force'
+	local create_flags='-o --ostype -d --distribution --ostemplate'
+	local create_optional_flags='--dst --changesid --no-hdd --lion-recovery'
+	local enter_flags='--current-user --user --password'
+	local exec_flags='--current-user -u --user -r --resolve-paths'
+	local exec_user_flags='--password'
+	local list_flags='-f --full -a --all -t --template -L -o --output -s --sort'
+	local list_info_flags='-i --info'
+	local list_info_options='-f --full -j --json'
+	local register_flags='--preserve-uuid --uuid --regenerate-src-uuid --force'
+	local stop_flags='--kill --noforce'
+	local snapshot_flags='-n --name -d --description'
+	local snapshotlist_flags='-t --tree -i --id'
+	local snapshotdelete_flags='-i --id'
+	local snapshotdelete_optional_flags='-c --children'
+	local snapshotswitch_flags='-i --id'
+	local snapshotswitch_optional_flags='--skip-resume'
+	local encrypt_flags='--dry-run'
+	local decrypt_flags='--dry-run'
+	local move_flags='--dst'
+	local problemreport_flags='-d --dump -s --send'
+	local problemreport_send_flags='--proxy'
+	local problemreport_optional_flags='--no-proxy --name --email --description'
+	local set_flags='--force --memquota --mem-hotplug --applyconfig --tools-autoupdate 
+		--vnc-mode --vnc-port --vnc-passwd --vnc-nopasswd 
+		--cpu-hotplug --distribution --userpasswd 
+		--usedefanswers --password-to-edit --template'
+	local general_options='--name --cpus --memsize --asset-id --description --template --rename-ext-disks'
+	local boot_order_options='--device-bootorder --efi-boot --select-boot-device --external-boot-device'
+	local video_options='--videosize --3d-accelerate --vertical-sync --high-resolution'
+	local mouse_and_keyboard_options='--smart-mouse-optimize --sticky-mouse --keyboard-optimize'
+	local print_options='--sync-host-printers --sync-default-printer'
+	local usb_and_bluetooth_options='--auto-share-camera --auto-share-bluetooth --support-usb30'
+	local device_options='--device-connect --device-disconnect --device-del --device-set --device-add'
+	local startup_and_shutdown_options='--autostart --autostart-delay --startup-view --on-shutdown 
+		--on-window-close --pause-idle --autostop --undo-disks --start-as-user'
+	local optimization_options='--faster-vm --adaptive-hypervisor --disable-winlogo --auto-compress 
+		--nested-virt --pmu-virt --longer-battery-life --battery-status --resource-quota'
+	local sharing_options='--smart-mount --shared-profile --shared-cloud --sh-app-guest-to-host --sh-app-host-to-guest --show-guest-app-folder-in-dock'
+	local shared_folder_options='--shf-host --shf-host-add --shf-host-del --shf-host-set --shf-host-defined --shf-guest --shf-guest-automount'
+	local coherence_options='--winsystray-in-macmenu --auto-switch-fullscreen --disable-aero --hide-min-windows'
+	local security_options='--require-pwd --lock-on-suspend --isolate-vm --smart-guard --sg-notify-before-create 
+		--sg-interval --sg-max-snapshots --lock-edit-settings'
+	local protection_options='--expiration'
+	local advanced_options='--time-sync --sync-vm-hostname --sync-ssh-ids --show-dev-tools --swipe-from-edges'
+	local global_flags='-l --login -p --read-passwd --compat -v --verbose --timeout'
+
+	local set_all_options='${general_options} ${boot_order_options} ${video_options} ${mouse_and_keyboard_options} 
+	 ${print_options} ${usb_and_bluetooth_options} ${device_options} ${startup_and_shutdown_options} ${optimization_options} 
+	 ${sharing_options} ${shared_folder_options} ${coherence_options} ${security_options} ${protection_options} 
+	 ${advanced_options}'
+
+	local device_del_options='--destroy-image --destroy-image-force --detach-only'
+	local device_set_options='--enable --disable --connect --disconnect'
+	local set_hostadmin_flag='--host-admin'
+
+	local device_add_hdd_flags='--image --type --size --split --iface --position --subtype'
+	local device_add_hdd_device_flags='--device --iface --passthr --position --subtype'
+	local device_add_cdrom_flags='--device --image'
+	local device_add_cdrom_optional_flags='--iface --passthr --position --subtype'
+	local device_add_net_flags='--iface --mac --ipadd --ipdel --dhcp --dhcp6 --gw --gw6 --nameserver 
+		--searchdomain --configure --apply-iponly --ipfilter --macfilter --preventpromisc --adapter-type'
+	local device_add_fdd_flags='--device --image --recreate'
+	local device_add_serial_flags='--device --output --socket'
+	local device_add_serial_optional_flags='--socket-mode'
+	local device_add_parallel_flags='--device --output'
+	local device_add_sound_flags='--output --input'
+
+	local shf_host_add_flags='--mode --shf-description --enable --disable'
+
+	if [ $COMP_CWORD == 1 ]; then
+		opts="${actions_on_vmid} ${actions_without_vmid} ${other_actions}"
+	else
+		for i in $actions_on_vmid; do
+			if [ "${prev}" = "${i}" ]; then
+				local IFS=$'\012'
+				COMPREPLY=( $( compgen -W "$( get_vms )" -- "${cur}" ) )
+				return 0
+			fi
+		done
+	fi
+
+	local is_add_device=0
+	local is_net=0
+	local is_hdd=0
+	local is_cdrom=0
+	local is_fdd=0
+	local is_serial=0
+	local is_parallel=0
+	local is_sound=0
+	local is_shf_host_add=0
+	local is_shf_host_set=0
+
+	for j in "${COMP_WORDS[@]}" ; do
+		if [[ $j == "--device-add" ]]; then is_add_device=1;
+		elif [[ $j == "--shf-host-add" ]]; then is_shf_host_add=1;
+		elif [[ $j == "--shf-host-set" ]]; then is_shf_host_set=1;
+
+		elif [[ $j == "net"      && $is_add_device == 1 ]]; then is_net=1;
+		elif [[ $j == "hdd"      && $is_add_device == 1 ]]; then is_hdd=1;
+		elif [[ $j == "cdrom"    && $is_add_device == 1 ]]; then is_cdrom=1;
+		elif [[ $j == "fdd"      && $is_add_device == 1 ]]; then is_fdd=1;
+		elif [[ $j == "serial"   && $is_add_device == 1 ]]; then is_serial=1;
+		elif [[ $j == "parallel" && $is_add_device == 1 ]]; then is_parallel=1;
+		elif [[ $j == "sound"    && $is_add_device == 1 ]]; then is_sound=1;
+		
+		fi
+	done
+
+	if [ -z "${opts}" ]; then
+
+		# processing all options that require arguments
+		case "${prev}" in
+		-n|--name)
+			if [ "${COMP_WORDS[1]}" = 'clone' ]; then
+				opts=""
+			else
+				opts=$(get_snaps_names)
+			fi
+			;;
+		--dst)
+			COMPREPLY=($(compgen -o dirnames -- "${cur}"))
+			return 0
+			;;
+		--file)
+			# TODO Add filtering on file extentions
+			COMPREPLY=($(compgen -A file -- "${cur}"))
+			return 0
+			;;
+		--ostype)
+			opts=$(get_ostypes)
+			;;
+		--distribution)
+			opts=$(get_distros)
+			;;
+		-d)
+			if [ "${COMP_WORDS[1]}" = 'create' ]; then
+				opts=$(get_distros)
+			elif [ "${COMP_WORDS[1]}" = 'problem-report' ]; then
+				opts="${problemreport_optional_flags} ${global_flags}"
+			else
+				opts=''
+			fi
+			;;
+		--ostemplate)
+			opts=$(get_ostemplates)
+			;;
+		--sort)
+			opts=''
+			;;
+		-s)
+			if [ "${COMP_WORDS[1]}" = 'problem-report' ]; then
+				opts='${problemreport_optional_flags} ${problemreport_send_flags} ${global_flags}'
+			else
+				opts=''
+			fi
+			;;
+		--device-add)
+			opts='hdd cdrom net fdd serial parallel sound usb'
+			;;
+		--device-del)
+			opts=$(get_devs "${COMP_WORDS[2]}")
+			;;
+		--device-connect)
+			opts=$(get_devs "${COMP_WORDS[2]}" 'disconnected')
+			;;
+		--device-disconnect)
+			opts=$(get_devs "${COMP_WORDS[2]}" 'connected')
+			;;
+		--device-set)
+			opts=$(get_devs)
+			;;
+		--cpus)
+			# FIXME It doesn't work on mac.
+			# max vcpus
+			#local cores=$(grep '^cpu cores' /proc/cpuinfo | wc -l )
+			#local proc=$(grep 'processor' /proc/cpuinfo | wc -l)
+			#opts=$[ $cores * $proc ]
+			opts=''
+			;;
+		--memsize)
+			# FIXME It doesn't work on mac.
+			# max available memory
+			# opts=$(cat /proc/meminfo | grep  "MemTotal:" | awk '{print $2}')
+			opts=''
+			;;
+		--autostart)
+			opts="off open-window start-app start-host user-login"
+			;;
+		--autostart-delay)
+			opts=''
+			;;
+		--autostop)
+			opts="stop suspend shutdown"
+			;;
+		--vnc-mode)
+			opts="auto manual off"
+			;;
+		--mode)
+			opts='ro rw'
+			;;
+		--path)
+			COMPREPLY=($(compgen -o dirnames -- "${cur}"))
+			return 0
+			;;
+		--asset-id)
+			opts=''
+			;;
+		--id)
+			opts="$(get_snaps_ids "${COMP_WORDS[2]}")"
+			;;
+		-o)
+			if [ "${COMP_WORDS[1]}" = 'create' ]; then
+				opts=$(get_ostypes)
+			else
+				opts=""
+			fi
+			;;
+		-i)
+			if [ "${COMP_WORDS[1]}" = 'list' ]; then
+				opts="${list_info_options} ${global_flags}"
+				COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+				local IFS=$'\012'
+				COMPREPLY+=($(compgen -W "$(get_vms)" -- "${cur}"))
+				return 0
+			else
+				opts="$(get_snaps_ids "${COMP_WORDS[2]}")"
+			fi
+			;;
+		--applyconfig)
+			COMPREPLY=($(compgen -A file -- "${cur}"))
+			return 0
+			;;
+		--linked)
+			opts='${clone_linked_flags}'
+			;;
+		--detach-external-hdd)
+			opts='yes no'
+			;;
+		--password|--user|--uuid|--description|--proxy|--email|--vnc-passwd|--host-admin|--shf-description)
+			opts=''
+			;;
+		-u)
+			if [ "${COMP_WORDS[1]}" = 'exec' ]; then
+				opts=''
+			fi
+			;;
+		--info)
+			if [ "${COMP_WORDS[1]}" = 'list' ]; then
+				opts="${list_info_options} ${global_flags}"
+				COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+				local IFS=$'\012'
+				COMPREPLY+=($(compgen -W "$(get_vms)" -- "${cur}"))
+				return 0
+			fi
+			;;
+			
+		# min:max[:priority[:maxballoon]] - maybe there is better solution to show it
+		--memquota)
+			opts='auto min:max[:priority[:maxballoon]'
+			;;
+		--mem-hotplug)
+			opts='on off'
+			;;
+		--tools-autoupdate)
+			opts='yes no'
+			;;
+		--vnc-port)
+			opts=''
+			;;
+		--cpu-hotplug)
+			opts='on off'
+			;;
+		# user:passwd - show as hint, maybe it is not necessary
+		--userpasswd)
+			opts='user:passwd'
+			;;
+		--usedefanswers)
+			opts='on off'
+			;;
+		--template)
+			if [ "${COMP_WORDS[1]}" = 'set' ]; then
+				opts='yes no'
+			elif [ "${COMP_WORDS[1]}" = 'clone' ]; then
+				opts='${clone_optional_flags} ${global_flags}'
+			else
+				opts='${list_flags} ${global_flags}'
+			fi
+			;;
+		--device-bootorder)
+			opts='$(get_devs "${COMP_WORDS[2]}")'
+			;;
+		--efi-boot)
+			opts='on off'
+			;;
+		--select-boot-device)
+			opts='on off'
+			;;
+		--external-boot-device)
+			opts=''
+			;;
+
+		--videosize)
+			opts=''
+			;;
+		--3d-accelerate)
+			opts='off highest dx9'
+			;;
+		--vertical-sync)
+			opts='on off'
+			;;
+		--high-resolution)
+			opts='on off'
+			;;
+
+		--smart-mouse-optimize)
+			opts='auto on off'
+			;;
+		--sticky-mouse)
+			opts='on off'
+			;;
+		--keyboard-optimize)
+			opts='on off'
+			;;
+
+		--sync-host-printers|--sync-default-printer)
+			opts='on off'
+			;;
+		--auto-share-camera|--auto-share-bluetooth|--support-usb30)
+			opts='on off'
+			;;
+		--startup-view)
+			opts='same window coherence fullscreen modality'
+			;;
+		--on-shutdown)
+			opts='window close quit'
+			;;
+		--on-window-close)
+			opts='suspend shutdown stop ask keep-running'
+			;;
+		--pause-idle)
+			opts='on off'
+			;;
+		# don't know if showing user:passwd in this list is a good idea
+		--start-as-user)
+			opts='administrator owner user:passwd'
+			;;
+		--undo-disks)
+			opts='off discard ask'
+			;;
+
+		--faster-vm|--adaptive-hypervisor|--disable-winlogo|--auto-compress)
+			opts='on off'
+			;;
+		--nested-virt|--pmu-virt)
+			opts='on off'
+			;;
+		--longer-battery-life|--battery-status)
+			opts='on off'
+			;;
+		--resource-quota)
+			opts='low medium unlimitted'
+			;;
+
+		--smart-mount|--shared-profile|--shared-cloud)
+			opts='on off'
+			;;
+		--sh-app-guest-to-host|--sh-app-host-to-guest|--show-guest-app-folder-in-dock)
+			opts='on off'
+			;;
+
+		--shf-host)
+			opts='on off'
+			;;
+		--shf-host-add|--shf-host-del|--shf-host-set)
+			opts=''
+			;;
+		--shf-host-defined)
+			opts='off alldisks home'
+			;;
+
+		--shf-guest)
+			opts='on off'
+			;;
+		--shf-guest-automount)
+			opts='on off'
+			;;
+
+		--winsystray-in-macmenu|--auto-switch-fullscreen|--disable-aero|--hide-min-windows)
+			opts='on off'
+			;;
+
+		--require-pwd)
+			opts='exit-fullscreen change-vm-state manage-snapshots change-guest-pwd'
+			;;
+		exit-fullscreen|change-vm-state|manage-snapshots|change-guest-pwd)
+			opts=':'
+			;;
+		:)
+			if [ "${COMP_WORDS[COMP_CWORD-3]}" == "--require-pwd" ]; then
+				opts='on off'
+			else
+				opts=''
+			fi
+			;;
+
+		--lock-on-suspend|--isolate-vm|--smart-guard|--sg-notify-before-create)
+			opts='on off'
+			;;
+
+		--sg-interval|--sg-max-snapshots)
+			opts=''
+			;;
+
+		--lock-edit-settings)
+			opts='on off'
+			;;
+
+		--time-sync)
+			opts='on off'
+			;;
+
+		--size|--position)
+			opts=''
+			;;
+		--image|--device|--output|--socket)
+			opts=''
+			;;
+		--type)
+			if [ "${is_net}" == 1 ]; then
+				opts='shared bridged host-only'
+			elif [ "${is_net}" == 0 ]; then
+				opts='expand plain'
+			else
+				opts='expand plain ddd'
+			fi
+			;;
+		--iface)
+			if [ $is_net == 1 ]; then
+				opts=''
+			else
+				opts='ide scsi sata'
+			fi
+			;;
+		--subtype)
+			opts='buslogic lsi-spi lsi-sas'
+			;;
+		--passthr)
+			opts='yes no'
+			;;
+		--mac)
+			opts='addr auto'
+			;;
+		--ipadd|--ipdel)
+			opts=''
+			;;
+		--dhcp|--dhcp6)
+			opts='yes no'
+			;;
+		--gw|--gw6)
+			opts=''
+			;;
+		--nameserver|--searchdomain)
+			opts=''
+			;;
+		--configure|--apply-iponly|--ipfilter|--macfilter|--preventpromisc)
+			opts='yes no'
+			;;
+		--adapter-type)
+			opts='virtio e1000 e1000e rtl'
+			;;
+		--socket-mode)
+			opts='server client'
+			;;
+		sound)
+			opts='--output'
+			;;
+		# FIXME: should we show <yyyy-MM-ddThh:mm:ss>, etc. ?
+		--expiration)
+			opts=' on off date:<yyyy-MM-ddThh:mm:ss> time-check:<seconds> offline-time:<seconds> time-server:<url> note:<text>'
+			;;
+		--sync-vm-hostname)
+			opts='on off'
+			;;
+		--sync-ssh-ids)
+			opts='on off'
+			;;
+		--show-dev-tools)
+			opts='on off'
+			;;
+		--swipe-from-edges)
+			opts='on off'
+			;;
+
+
+		# Global options:
+
+		-l|--login)
+			# user:passwd@server
+			opts=''
+			;;
+		--timeout)
+			opts=''
+			;;
+		-p|--read-passwd)
+			COMPREPLY=($(compgen -A file -- "${cur}"))
+			return 0
+			;;
+		--verbose|-v)
+			opts='0 1 2 3'
+			;;
+
+
+
+		*) # processing actions' local options
+
+			case "${COMP_WORDS[1]}" in
+			capture)
+				if [ $COMP_CWORD == 3 ]; then
+					opts="${capture_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+			clone)
+				case "${COMP_CWORD}" in
+				3)
+					opts="${clone_flags}"
+					;;
+				*)
+					opts="${clone_optional_flags} ${global_flags}"
+					;;
+				esac
+				;;
+			convert)
+				if [ $COMP_CWORD == 2 ]; then
+					COMPREPLY=($(compgen -A file -- "${cur}"))
+					return 0
+				else
+					opts="${convert_flags} ${global_flags}"
+				fi
+				;;
+			create)
+				case "${COMP_CWORD}" in
+				2)
+					opts=""
+					;;
+				3)
+					opts="${create_flags}"
+					;;
+				*)
+					opts="${create_optional_flags} ${global_flags}"
+					;;
+				esac
+				;;
+			delete)
+				opts="${global_flags}"
+				;;
+			enter)
+				[ $COMP_CWORD == 3 ] && opts="${enter_flags} ${global_flags}"
+				;;
+			exec)
+				opts="${exec_flags} ${exec_user_flags} ${global_flags}"
+				;;
+			list)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${list_flags} ${list_info_flags} ${global_flags}"
+				elif [[ "${COMP_WORDS[2]}" == '--info' || "${COMP_WORDS[2]}" == '-i' ]]; then
+					opts="${list_info_options} ${global_flags}"
+					COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+					local IFS=$'\012'
+					COMPREPLY+=($(compgen -W "$(get_vms)" -- "${cur}"))
+					return 0
+				else
+					opts="${list_flags} ${global_flags}"
+				fi
+				;;
+			move)
+				case "${COMP_CWORD}" in
+				3)
+					opts="${move_flags}"
+					;;
+				*)
+					opts="${global_flags}"
+					;;
+				esac
+				;;
+			pause)
+				opts="${global_flags}"
+				;;
+			register)
+				if [ $COMP_CWORD == 2 ]; then
+					COMPREPLY=($(compgen -A file -- "${cur}"))
+					return 0
+				else
+					opts="${register_flags} ${global_flags}"
+				fi
+				;;
+			reset)
+				opts="${global_flags}"
+				;;
+			reset-uptime)
+				opts="${global_flags}"
+				;;
+			restart)
+				opts="${global_flags}"
+				;;
+			resume)
+				opts="${global_flags}"
+				;;
+			start)
+				opts="${global_flags}"
+				;;
+			status)
+				opts="${global_flags}"
+				;;
+			change-sid)
+				opts="${global_flags}"
+				;;
+			server)
+				if [ $COMP_CWORD == 2 ]; then
+					opts='shutdown info'
+				else
+					opts="${global_flags}"
+				fi
+				;;
+			stop)
+				if [ $COMP_CWORD == 2 ]; then
+					local IFS=$'\012'
+					COMPREPLY+=($(compgen -W "$(get_vms)" -- "${cur}"))
+					return 0
+				elif [ $COMP_CWORD == 3 ]; then
+					opts="${stop_flags} ${global_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+			snapshot)
+				opts="${snapshot_flags} ${global_flags}" 
+				;;
+			snapshot-delete)
+				if [ $COMP_CWORD == 3 ]; then
+					opts="${snapshotdelete_flags}" 
+				else
+					opts="${snapshotdelete_optional_flags} ${global_flags}"
+				fi
+				;;
+			snapshot-list)
+				opts="${snapshotlist_flags} ${global_flags}" 
+				;;
+			snapshot-switch)
+				if [ $COMP_CWORD == 3 ]; then
+					opts="${snapshotswitch_flags}" 
+				else
+					opts="${snapshotswitch_optional_flags} ${global_flags}"
+				fi
+				;;
+			suspend)
+				if [ $COMP_CWORD == 2 ]; then
+					local IFS=$'\012'
+					COMPREPLY+=($(compgen -W "$(get_vms)" -- "${cur}"))
+					return 0
+				else
+					opts="${global_flags}"
+				fi
+				;;
+			statistics)
+				opts="${statistics_flags} ${global_flags}"
+				;;
+			encrypt)
+				opts="${encrypt_flags} ${global_flags}"
+				;;
+			decrypt)
+				opts="${decrypt_flags} ${global_flags}"
+				;;
+			unregister)
+				opts="${global_flags}"
+				;;
+			protection-set)
+				opts="${global_flags}"
+				;;
+			protection-remove)
+				opts="${global_flags}"
+				;;
+			change-passwd)
+				opts="${global_flags}"
+				;;
+			problem-report)
+				if [ $COMP_CWORD == 3 ]; then
+					opts="${problemreport_flags}"
+				elif [ "${COMP_WORDS[3]}" == '--send' ]; then
+					opts="${problemreport_optional_flags} ${problemreport_send_flags} ${global_flags}"
+				elif [ "${COMP_WORDS[3]}" == '-s' ]; then
+					opts="${problemreport_optional_flags} ${problemreport_send_flags} ${global_flags}"
+				else
+					opts="${problemreport_optional_flags} ${global_flags}"
+				fi
+				;;
+			set)
+				if [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--lock-edit-settings" && "${COMP_WORDS[COMP_CWORD-1]}" == "off" ]]; then
+					opts="${set_flags} ${set_hostadmin_flag} ${set_all_options} ${global_flags}"
+				elif [ "${COMP_WORDS[COMP_CWORD-2]}" == "--userpasswd" ]; then
+					opts="${set_flags} ${set_hostadmin_flag} ${set_all_options} ${global_flags}"
+				elif [ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-del" ]; then
+					opts="${set_flags} ${device_del_options} ${set_all_options} ${global_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-set" || "${COMP_WORDS[COMP_CWORD-3]}" == "--device-set" ]]; then
+					opts="${set_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-add" && "${COMP_WORDS[COMP_CWORD-1]}" == "cdrom" ]]; then
+					opts="${device_add_cdrom_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-add" && "${COMP_WORDS[COMP_CWORD-1]}" == "net" ]]; then
+					opts="--type"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-add" && "${COMP_WORDS[COMP_CWORD-1]}" == "serial" ]]; then
+					opts="${device_add_serial_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--device-add" && "${COMP_WORDS[COMP_CWORD-1]}" == "parallel" ]]; then
+					opts="${device_add_parallel_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--socket" ]]; then
+					opts="${set_flags} ${device_add_serial_optional_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+				elif [[ "${COMP_WORDS[COMP_CWORD-3]}" == "sound" ]]; then
+					opts="--input"
+
+				elif [[ $is_hdd == 1 ]]; then
+					opts="${set_flags} ${device_add_hdd_flags} ${device_set_options} ${device_add_hdd_device_flags}
+						${set_all_options} ${global_flags}"
+				elif [[ $is_cdrom == 1 ]]; then
+					opts="${set_flags} ${device_add_cdrom_optional_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+				elif [[ $is_net == 1 ]]; then
+					opts="${set_flags} ${device_add_net_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+				elif [[ $is_fdd == 1 ]]; then
+					opts="${set_flags} ${device_add_fdd_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--shf-host-add" ]]; then
+					opts="--path"
+				elif [[ $is_shf_host_add == 1 ]]; then
+					opts="${set_flags} ${shf_host_add_flags} ${set_all_options} ${global_flags}"
+				elif [[ $is_shf_host_set == 1 ]]; then
+					opts="${set_flags} --path ${shf_host_addprlctl_flags} ${set_all_options} ${global_flags}"
+
+				elif [[ $is_add_device == 1 ]]; then
+					opts="${set_flags} ${device_set_options} ${set_all_options} ${global_flags}"
+
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--lock-edit-settings" ]]; then
+					opts="${set_flags} --host-admin ${set_all_options} ${global_flags}"
+				else
+					opts="${set_flags} ${set_all_options} ${global_flags}"
+				fi
+				;;
+			*)
+				;;
+			esac
+			;;
+		esac
+	fi
+
+	COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+
+	return 0
+}
+
+complete -o filenames -F _prlctl prlctl

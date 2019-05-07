@@ -1,0 +1,350 @@
+# Parallels Desktop for Mac
+# Bash completion helpers for prlsrvctl command-line tool.
+#
+# Copyright (c) Parallels International GmbH.
+# All rights reserved.
+# http://www.parallels.com
+
+_prlsrvctl()
+{
+	local cur prev opts base
+	COMPREPELY=()
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	local actions_list="info install-license deferred-license update-license activate-license-online \
+		activate-license-offline deactivate-license set shutdown user problem-report net usb plugin"
+
+	local info_flags='-j --json --license -f --full --activation-id --deactivation-id'
+	local install_license_flags='-k --key'
+	local install_license_optional_flags='-n --name -c --company --deferred --activate-online-immediately'
+	local deferred_license_flags='--install --remove'
+	local activate_license_offline_flags='-i --id'
+	local deactivate_license_flags='--skip-network-errors'
+	local set_flags='--mem-limit -s --min-security-level --mng-settings --device
+		-c --cep --default-encryption-plugin
+		--reset-default-encryption-plugin --verbose-log --connect-to-pm
+		--use-deploy-id --register-host-only --disconnect-from-pm --turn-off-pm-connect --turn-on-pm-connect
+		--cleanup-proxy-creds --allow-direct-mobile --log-rotation --advanced-security-mode --proxy-manager-url
+		--default-proxy-manager-url --web-portal-domain --default-web-portal-domain --allow-attach-screenshots
+		--require-pwd --require-custom-pwd --custom-pwd --custom-pwd-mode --lock-edit-settings --external-dev-auto-connect'
+	local shutdown_flags='-f --force'
+	local user_flags='list set'
+	local user_list_flags='-o --output -j --json'
+	local user_set_flags='--def-vm-home'
+	local problem_report_flags='-d --dump -s --send'
+	local problem_report_send_flags='--proxy --no-proxy'
+	local problem_report_optional_flags='--stand-alone --name --email --description'
+	local net_flags='add set del info list'
+	local net_add_flags='-i --ifname -m --mac -t --type -d --description --ip --dhcp-server
+		--dhcp-ip --ip-scope-start --ip-scope-end --ip6 --dhcp6-server --dhcp-ip6
+		--ip6-scope-start --ip6-scope-end --connect-host-to-net
+		--nat-tcp-add --nat-udp-add'
+	local net_set_flags='-i --ifname -m --mac -t --type -d --description -n --name --ip
+		--dhcp-server --dhcp-ip --ip-scope-start --ip-scope-end --ip6 --dhcp6-server --dhcp-ip6
+		--ip6-scope-start --ip6-scope-end --connect-host-to-net
+		--nat-tcp-add --nat-udp-add --nat-tcp-del --nat-udp-del'
+	local list_flags='-j --json'
+	local usb_flags='list del set'
+	local usb_set_flags='vm-uuid vm-name'
+
+	local plugin_flags='list refresh'
+
+	local global_flags='-l --login -p --read-passwd --compat -v --verbose --timeout'
+
+
+	if [ $COMP_CWORD == 1 ]; then
+		opts="${actions_list}"
+	fi
+
+
+	if [ -z "${opts}" ]; then
+		# processing all options that require arguments
+		case "${prev}" in
+		-k|--key)
+			opts=''
+			;;
+		-n|--name|-o|--output|--email|--host-admin)
+			opts=''
+			;;
+		--company|--description)
+			opts=''
+			;;
+		-d)
+			if [ "${COMP_WORDS[1]}" == 'problem-report' ]; then
+				opts='${problem_report_optional_flags} ${global_flags}'
+			else
+				opts=''
+			fi
+			;;
+		-c)
+			if [ "${COMP_WORDS[1]}" == 'set' ]; then
+				opts='on off'
+			else
+				opts=''
+			fi
+			;;
+		-i|--id|--ifname)
+			opts=''
+			;;
+		# FIXME Show "size" or not?
+		--mem-limit)
+			opts='auto size'
+			;;
+		--min-security-level)
+			opts='low normal high'
+			;;
+		-s)
+			if [ "${COMP_WORDS[1]}" == 'set' ]; then
+				opts='low normal high'
+			else
+				opts='${problem_report_optional_flags} ${problem_report_send_flags} ${global_flags}'
+			fi
+			;;
+		--mng-settings)
+			opts='allow deny'
+			;;
+		--device)
+			opts=''
+			;;
+		--assignment)
+			opts='host vm'
+			;;
+		--cep)
+			opts='on off'
+			;;
+		--default-encryption-plugin)
+			opts=''
+			;;
+		--verbose-log)
+			opts='on off'
+			;;
+		--connect-to-pm)
+			opts='user deploy-id'
+			;;
+		--allow-direct-mobile)
+			opts='on off'
+			;;
+		--log-rotation)
+			opts='on off'
+			;;
+		--advanced-security-mode)
+			opts='auth off'
+			;;
+		--proxy-manager-url)
+			opts=''
+			;;
+		--web-portal-domain)
+			opts=''
+			;;
+		--allow-attach-screenshots)
+			opts='on off'
+			;;
+		--require-pwd)
+			opts='create-vm add-vm remove-vm clone-vm'
+			;;
+		--require-custom-pwd)
+			opts='create-vm add-vm remove-vm clone-vm edit-preferences'
+			;;
+		--custom-pwd)
+			opts=''
+			;;
+		--custom-pwd-mode)
+			opts='on off change'
+			;;
+		create-vm|add-vm|remove-vm|clone-vm)
+			opts='on off'
+			;;
+		--lock-edit-settings)
+			opts='on off'
+			;;
+		--external-dev-auto-connect)
+			opts='host guest ask'
+			;;
+		--def-vm-home)
+			opts=''
+			;;
+		# FIXME Show [user[:password]@proxyhost[:port]] or not?
+		--proxy)
+			opts='[user[:password]@proxyhost[:port]]'
+			;;
+		-m|--mac)
+			opts=''
+			;;
+		-t|--type)
+			opts='bridged host-only shared'
+			;;
+		--ip|--ip6)
+			opts='addr[/mask]'
+			;;
+		--dhcp-server|--dhcp6-server)
+			opts='on off'
+			;;
+		--dhcp-ip|--dhcp-ip6|--ip-scope-start|--ip-scope-end|--ip6-scope-start|--ip6-scope-end)
+			opts=''
+			;;
+		--connect-host-to-net)
+			opts='on off'
+			;;
+		# FIXME Show "<rule_name,src_port,<dest_ip|dest_vm>,dest_port>" or not?
+		--nat-tcp-add|--nat-udp-add)
+			opts='<rule_name,src_port,<dest_ip|dest_vm>,dest_port>'
+			;;
+		--nat-tcp-del|--nat-udp-del)
+			opts='<rule_name>'
+			;;
+
+
+	# Global options:
+
+		-l|--login)
+			# user:passwd@server
+			opts=''
+			;;
+		--timeout)
+			opts=''
+			;;
+		-p|--read-passwd)
+			COMPREPLY=($(compgen -A file -- "${cur}"))
+			return 0
+			;;
+		--verbose|-v)
+			opts='0 1 2 3'
+			;;
+
+
+
+		*) # processing actions' local options
+
+			case "${COMP_WORDS[1]}" in
+
+			info)
+				opts="${info_flags} ${global_flags}"
+				;;
+
+			install-license)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${install_license_flags}"
+				else
+					opts="${install_license_optional_flags} ${global_flags}"
+				fi
+				;;
+
+			deferred-license)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${deferred_license_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			update-license)
+				opts="${global_flags}"
+				;;
+
+			activate-license-online)
+				opts="${global_flags}"
+				;;
+
+			activate-license-offline)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${activate_license_offline_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			deactivate-license)
+				opts="${deactivate_license_flags} ${global_flags}"
+				;;
+
+			set)
+				if [ "${COMP_WORDS[$COMP_CWORD - 2]}" == '--device' ]; then
+					opts="--assignment"
+				elif [[ "${COMP_WORDS[COMP_CWORD-2]}" == "--lock-edit-settings" ]]; then
+					opts="${set_flags} --host-admin ${set_all_options} ${global_flags}"
+				else
+					opts="${set_flags} ${global_flags}"
+				fi
+				;;
+
+
+			shutdown)
+				opts="${shutdown_flags} ${global_flags}"
+				;;
+
+			user)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${user_flags}"
+				elif [ "${COMP_WORDS[2]}" == 'list' ]; then
+					opts="${user_list_flags} ${global_flags}"
+				elif [ $COMP_CWORD == 3 ]; then
+					opts="${user_set_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			problem-report)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${problem_report_flags}"
+				elif [[ "${COMP_WORDS[2]}" == '--send' || "${COMP_WORDS[2]}" == '-s' ]]; then
+					opts="${problem_report_optional_flags} ${problem_report_send_flags} ${global_flags}"
+				else
+					opts="${problem_report_optional_flags} ${global_flags}"
+				fi
+				;;
+
+			net)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${net_flags}"
+				elif [ "${COMP_WORDS[2]}" == 'list' ]; then
+					opts="${list_flags} ${global_flags}"
+				elif [ $COMP_CWORD == 3 ]; then
+					opts=""
+				elif [ "${COMP_WORDS[2]}" == 'add' ]; then
+					opts="${net_add_flags} ${global_flags}"
+				elif [ "${COMP_WORDS[2]}" == 'set' ]; then
+					opts="${net_set_flags} ${global_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			usb)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${usb_flags}"
+				elif [ "${COMP_WORDS[2]}" == 'list' ]; then
+					opts="${list_flags} ${global_flags}"
+				elif [ $COMP_CWORD == 3 ]; then
+					opts=""
+				elif [[ $COMP_CWORD == 4 && "${COMP_WORDS[2]}" == 'set' ]]; then
+					opts="${usb_set_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			plugin)
+				if [ $COMP_CWORD == 2 ]; then
+					opts="${plugin_flags}"
+				elif [ "${COMP_WORDS[2]}" == 'list' ]; then
+					opts="${list_flags} ${global_flags}"
+				else
+					opts="${global_flags}"
+				fi
+				;;
+
+			*)
+				;;
+			esac
+			;;
+		esac
+	fi
+
+	COMPREPLY=($(compgen -W "${opts}" -- "${cur}"))
+
+	return 0
+}
+
+complete -F _prlsrvctl prlsrvctl
